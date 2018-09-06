@@ -1,0 +1,25 @@
+#JSGF V1.0 UTF-8 en;
+
+grammar jacksonCommands;
+
+public <command> = [<junk>] (<animation> | show me [<junk>] <animation> | <change> | light up <color> | brighter | dimmer) [<junk>];
+
+/* Make sure to update config.py GRAMMAR_JUNK if these are changed! */
+<junk> = please | thank you | thanks | the | your | to;
+
+<animation> = wink | sparkle | knight rider | spectrum;
+
+/* Make sure to update config.py GRAMMAR_CHANGE if these are changed! */
+<change> = (change | set | update | modify | make) [<junk>] <state>;
+
+<state> = <color_state> | <brightness_state>;
+
+<color_state> = color [<junk>] <color>;
+
+<brightness_state> = brightness [<junk>] <brightness_level>;
+
+/* Make sure to update config.py COLOR_HUES table if these are changed! */
+<color> = red | orange | yellow | green | turquoise | cyan | blue | violet | purple | magenta | scarlet;
+
+/ * Make sure to update config.py BRIGHTNESS_VALUES table if these are changed! */
+<brightness_level> = zero | one | two | three | low | medium | high | max;
