@@ -2,6 +2,7 @@
 # Main logic.
 # Author: Tony DiCola
 # License: MIT https://opensource.org/licenses/MIT
+import collections
 import logging
 import math
 import numbers
@@ -20,12 +21,6 @@ import speech
 import utils
 
 
-# TODO:
-# - Add command threshold (i.e. score above 3000 or so)
-# - Bug: stop iteration when not in idle will force back into idle (say happy during other animation) - It's time to add a proper animation stack
-# - Make wink go 'off (half)' - 'on' for 0.75 seconds
-
-
 logger = logging.getLogger(__name__)
 
 
@@ -40,9 +35,10 @@ class Jackson:
         self._happiness = 0  # Value that goes from -3 to 3
         self._brightness = 2 # Value that goes from 0 to 3
         self._hue = 0.0
-        self._animation = self._idle_animation()
+        self._animations = collections.deque()
+        self._push_animation(self._idle_animation())
+        self._listen_animation = self._create_pulse_animation(80.0, 2.0)
         self._state_lock = threading.RLock()
-        self._animation_lock = threading.RLock()
         # Configure the keywords and their associated callbacks.
         for w in config.WAKE_WORDS:
             self._keywords.register(w, self._wake)
@@ -68,13 +64,28 @@ class Jackson:
         self._commands.register_starts_with('modify', self._change)
         self._commands.register_starts_with('make', self._change)
 
-    def _animate(self, animation):
-        with self._animation_lock:
-            self._animation = animation
+    # Animation control helpers:
+    def _push_animation(self, animation, duration=None):
+        # Push an animation (generator that returns pixel values) onto the
+        # animation stack, assigning it an optional duration to run.
+        if duration is None:
+            self._animations.appendleft(animation)
+        else:
+            self._animations.appendleft(self._animate_duration(duration, animation))
+
+    def _pop_animation(self):
+        # Pop the current animation off the animation stack and return it.
+        try:
+            return self._animations.popleft()
+        except IndexError:
+            return None
 
     # Properties that define Jackon's state:
     @property
     def happiness(self):
+        """Jackson's happiness, a value clamped to the range -3 to 3
+        (inclusive).  The higher the happiness the faster animations run.
+        """
         with self._state_lock:
             return self._happiness
 
@@ -89,11 +100,14 @@ class Jackson:
 
     @property
     def happiness_freq(self):
-        # Convert happiness into an animation speed/frequency.
+        """Express happiness as a frequency value for animations."""
         return utils.lerp(self.happiness, -3.0, 3.0, 1.0/4.0, 2.0)
 
     @property
     def brightness(self):
+        """Jackson's LED brightness, a value clamped to the range 0 to 3 with
+        0 being off and 3 being full bright.  The default/starting value is 2.
+        """
         with self._state_lock:
             return self._brightness
 
@@ -110,10 +124,14 @@ class Jackson:
 
     @property
     def brightness_hsv(self):
+        """Express brightness as a HSV value (0 to 1.0)."""
         return utils.lerp(self.brightness, 0.0, 3.0, 0.0, 1.0)
 
     @property
     def hue(self):
+        """Jackson's current hue for animations.  This will change over time
+        depending on Jackson's happiness.
+        """
         with self._state_lock:
             return self._hue
 
@@ -130,10 +148,12 @@ class Jackson:
     # Keyword callbacks:
     def _wake(self, command):
         # Green/yellow pulse while listening.
-        pulse = self._create_pulse_animation(80.0, 2.0)
-        self._animate(pulse)
+        self._push_animation(self._listen_animation)
         command, score = self._speech.listen_command()
-        self._animate(self._animate_between(0.0, 1.0, pulse, self._idle_animation()))
+        self._pop_animation()
+        self._push_animation(self._animate_between(0.0, 1.0,
+                             self._listen_animation,
+                             self._idle_animation()))
         logger.debug('Detected keyword: {0} [score: {1}]'.format(command, score))
         # TODO: Add score threshold?
         self._commands.dispatch(command)
@@ -141,34 +161,41 @@ class Jackson:
     def _increment_happiness(self, command, val):
         self.happiness += val
         if val > 0:
-            old = self._animation
-            self._animate(self._animate_between(0.5, 1.5,
+            current = self._animations[0]
+            self._push_animation(self._animate_between(0.5, 1.5,
                 self._create_pulse_animation(350.0, 1.0),
-                old))
+                current))
         else:
-            old = self._animation
-            self._animate(self._animate_between(0.5, 1.5,
+            current = self._animations[0]
+            self._push_animation(self._animate_between(0.5, 1.5,
                 self._create_pulse_animation(240.0, 1.0),
-                old))
+                current))
 
     # Command callbacks:
     def _wink(self, command):
         logger.debug('Wink animation')
-        self._animate(self._animate_duration(0.75, self._wink_animation))
+        # TODO: This is ugly that the animations use a global clock and listen
+        # needs to have a longer duration as its clock ticks during wink.
+        self._push_animation(self._listen_animation, duration=1.25)
+        self._push_animation(self._wink_animation(), duration=0.75)
 
     def _spectrum(self, command):
         logger.debug('Spectrum animation')
-        self._animate(self._animate_between(config.ANIMATION_DURATION, 1.0,
-            self._spectrum_animation(), self._idle_animation()))
+        self._push_animation(self._animate_between(config.ANIMATION_DURATION,
+            1.0,
+            self._spectrum_animation(),
+            self._idle_animation()))
 
     def _sparkle(self, command):
         logger.debug('Sparkle animation')
-        self._animate(self._animate_between(config.ANIMATION_DURATION, 1.0,
-            self._sparkle_animation(), self._idle_animation()))
+        self._push_animation(self._animate_between(config.ANIMATION_DURATION,
+            1.0,
+            self._sparkle_animation(),
+            self._idle_animation()))
 
     def _knight_rider(self, command):
         logger.debug('Knight Rider animation')
-        self._animate(self._animate_between(config.ANIMATION_DURATION, 1.0,
+        self._push_animation(self._animate_between(config.ANIMATION_DURATION, 1.0,
             self._knight_rider_animation(), self._idle_animation()))
 
     def _increment_brightness(self, command, val):
@@ -190,7 +217,7 @@ class Jackson:
             return
         self.hue = command[2]
         # Snap straight to animating at this new hue and stop any fade out.
-        self._animate(self._idle_animation())
+        self._push_animation(self._idle_animation())
 
     def _change_animation(self, command):
         logger.debug('Change animation')
@@ -215,7 +242,6 @@ class Jackson:
     def _sparkle_animation(self):
         n = len(self._lights)
         phases = [random.uniform(0, 2.0*math.pi) for _ in range(n)]
-        #frequencies = [random.uniform(0.25, 1.5) for _ in range(n)]
         f = self.happiness_freq
         frequencies = [random.uniform(f/2.0, 2.0*f) for _ in range(n)]
         while True:
@@ -257,7 +283,7 @@ class Jackson:
             freqs = 10*np.log10(np.abs(np.fft.rfft(audio)))
             if len(freqs) < (n+1):
                 continue
-            max_power = 30.0  #TODO: tune this value?
+            max_power = 30.0  #TODO: Auto tune this value?
             max_value = self.brightness_hsv
             for i in range(n):
                 hue = utils.lerp(i, 0, n, 0.0, 360.0)
@@ -267,13 +293,12 @@ class Jackson:
 
     def _wink_animation(self):
         left_on = random.random() >= 0.5
-        pulse = self._create_pulse_animation(80.0, 2.0)()
         n = len(self._lights)
         half = n // 2
         while True:
             t = time.time()
             for i in range(n):
-                color = next(pulse)
+                color = next(self._listen_animation)
                 if left_on and i < half:
                     yield color
                 elif not left_on and i >= half:
@@ -285,7 +310,6 @@ class Jackson:
     # are customized with special behavior or functionality.
     def _animate_duration(self, duration_s, animation):
         end = time.time() + duration_s
-        #animation = animation()
         def _animate_duration_inner():
             while time.time() < end:
                 yield next(animation)
@@ -297,8 +321,6 @@ class Jackson:
         fade_start = start + first_duration
         end = fade_start + fade_duration
         n = len(self._lights)
-        #first = first()
-        #second = second()
         def _animate_between_inner():
             t = time.time()
             while t < fade_start:
@@ -331,21 +353,22 @@ class Jackson:
             keyword = self._speech.listen_keyword()
             self._keywords.dispatch(keyword)
 
+    # Background thread to drive LED animations.
     def _animate_lights(self):
         period = 1/60.0
         n = len(self._lights)
         while True:
             try:
-                with self._animation_lock:
+                if self._animations:
+                    animation = self._animations[0]
                     for i in range(n):
-                        self._lights.set_pixel(i, next(self._animation))
-                self._lights.show()
+                        self._lights.set_pixel(i, next(animation))
+                    self._lights.show()
                 time.sleep(period)
             except StopIteration:
-                # Switch back to idle animation after a previous
-                # animation finishes.
-                self._animate(self._idle_animation())
+                self._pop_animation()
 
+    # Foreground thread to drive state changes over time.
     def _cycle_hue(self):
         period = 1/60.0
         last = time.time()

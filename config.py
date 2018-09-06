@@ -51,7 +51,7 @@ WAKE_WORDS = {
     'yo jackson': '1e-05'
 }
 HAPPY_WORDS = {
-    'love':       '1e-05',
+    'happiness':  '1e-05',
     'respect':    '1e-05',
     'excitement': '1e-05'
 }
