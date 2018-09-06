@@ -22,9 +22,7 @@ import utils
 
 # TODO:
 # - Add command threshold (i.e. score above 3000 or so)
-# - Add color.py tests
 # - Bug: stop iteration when not in idle will force back into idle (say happy during other animation) - It's time to add a proper animation stack
-# - Put generic animation functions (between, duration, etc.) in animations.py
 # - Make wink go 'off (half)' - 'on' for 0.75 seconds
 
 
