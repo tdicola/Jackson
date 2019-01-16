@@ -1,7 +1,7 @@
 # Jackson
 Jackson: Voice-controlled Jacket with Raspberry Pi &amp; PocketSphinx
 
-<iframe width="560" height="315" src="https://www.youtube.com/embed/D0Vzyq3gjkk" frameborder="0" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+[![Jackson jacket](https://img.youtube.com/vi/D0Vzyq3gjkk/0.jpg)](https://www.youtube.com/watch?v=D0Vzyq3gjkk)
 
 Jackson is a wearable intelligent device that animates LEDs on a jacket using voice control.  Just speak to Jackson and command it to change
 color, animation, and more.  Jackson is always listening with its microphone
